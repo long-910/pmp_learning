@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PMP学習アプリ</title>
+  <style>
+    :root {
+      --bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--text:#e2e8f0;--text2:#94a3b8;
+      --border:#334155;--accent:#3b82f6;--accent2:#1d4ed8;
+      --correct:#22c55e;--wrong:#ef4444;--warn:#f59e0b;
+      --r:8px;--shadow:0 4px 6px -1px rgba(0,0,0,.3);
+      --mono:'JetBrains Mono',monospace;
+    }
+    .light{--bg:#f8fafc;--bg2:#fff;--bg3:#f1f5f9;--text:#0f172a;--text2:#475569;--border:#e2e8f0;--shadow:0 4px 6px -1px rgba(0,0,0,.1);}
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Inter','Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6;font-size:15px;}
+
+    /* パスワード */
+    .pw-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200;}
+    .pw-box{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:340px;width:100%;box-shadow:var(--shadow);}
+    .pw-title{font-size:22px;font-weight:800;color:var(--accent);margin-bottom:4px;}
+    .pw-sub{font-size:13px;color:var(--text2);margin-bottom:20px;}
+    .pw-input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);font-size:15px;margin-bottom:10px;outline:none;}
+    .pw-input:focus{border-color:var(--accent);}
+    .pw-error{color:var(--wrong);font-size:12px;margin-bottom:8px;display:none;}
+    .pw-error.show{display:block;}
+
+    /* ヘッダー */
+    .header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;gap:8px;flex-wrap:wrap;}
+    .header-title{font-size:17px;font-weight:800;color:var(--accent);white-space:nowrap;}
+    .header-right{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+    .set-selector{display:flex;gap:4px;}
+    .set-btn{padding:4px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px;font-family:var(--mono);}
+    .set-btn:hover,.set-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+    /* タイマーバー */
+    .timer-bar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+    .timer-display{font-family:var(--mono);font-size:22px;font-weight:800;min-width:85px;}
+    .timer-display.warn{color:var(--warn);}
+    .timer-display.danger{color:var(--wrong);animation:pulse 1s infinite;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .timer-controls{display:flex;gap:5px;}
+    .stats-inline{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap;}
+    .stat{display:flex;flex-direction:column;align-items:center;}
+    .stat-lbl{font-size:10px;color:var(--text2);}
+    .stat-val{font-family:var(--mono);font-weight:700;font-size:15px;}
+    .stat-val.c{color:var(--correct);}
+    .stat-val.w{color:var(--wrong);}
+    .progress-track{height:3px;background:var(--bg3);}
+    .progress-fill{height:100%;background:var(--accent);transition:width .4s;}
+
+    /* ボタン */
+    .btn{padding:6px 13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px;}
+    .btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .btn.accent{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .btn.accent:hover{background:var(--accent2);}
+    .btn.sm{padding:4px 9px;font-size:12px;}
+    .btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+    /* メイン */
+    .main{max-width:960px;margin:0 auto;padding:14px;display:flex;flex-direction:column;gap:12px;}
+    .hidden{display:none!important;}
+
+    /* ローディング */
+    .loading-area{display:none;align-items:center;justify-content:center;gap:12px;padding:40px;color:var(--text2);}
+    .spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ナビバー */
+    .nav-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+    .filter-select{padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;flex:1;min-width:160px;}
+
+    /* 問題カード */
+    .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);}
+    .q-meta{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+    .q-id{font-family:var(--mono);font-size:12px;color:var(--text2);}
+    .domain-tag{padding:3px 10px;border-radius:999px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;}
+    .q-text{font-size:15px;line-height:1.75;margin-bottom:14px;}
+    .options{display:flex;flex-direction:column;gap:7px;}
+    .option-btn{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:14px;line-height:1.55;transition:all .15s;width:100%;}
+    .option-btn:hover:not(:disabled){border-color:var(--accent);background:rgba(59,130,246,.08);}
+    .option-btn:disabled{cursor:default;}
+    .option-btn.correct{border-color:var(--correct);background:rgba(34,197,94,.1);color:var(--text);}
+    .option-btn.wrong{border-color:var(--wrong);background:rgba(239,68,68,.1);color:var(--text);}
+    .opt-lbl{font-family:var(--mono);font-size:12px;color:var(--text2);min-width:18px;padding-top:2px;flex-shrink:0;}
+    .explanation{margin-top:12px;padding:12px 14px;background:var(--bg3);border-radius:var(--r);border-left:3px solid var(--accent);font-size:13px;line-height:1.65;display:none;}
+    .explanation.show{display:block;}
+
+    /* 問題グリッド */
+    .qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(32px,1fr));gap:4px;}
+    .qgrid-btn{aspect-ratio:1;border:1px solid var(--border);border-radius:5px;background:var(--bg3);color:var(--text2);font-size:10px;font-family:var(--mono);cursor:pointer;transition:all .15s;}
+    .qgrid-btn:hover{border-color:var(--accent);}
+    .qgrid-btn.current{border-color:var(--accent);background:var(--accent);color:#fff;}
+    .qgrid-btn.correct{background:rgba(34,197,94,.25);border-color:var(--correct);color:var(--correct);}
+    .qgrid-btn.wrong{background:rgba(239,68,68,.25);border-color:var(--wrong);color:var(--wrong);}
+
+    /* 結果ビュー */
+    .results-view,.dashboard-view{display:none;}
+    .results-view.show,.dashboard-view.show{display:flex;flex-direction:column;gap:12px;}
+    .result-score{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:28px;text-align:center;box-shadow:var(--shadow);}
+    .result-score-value{font-size:56px;font-weight:900;font-family:var(--mono);}
+    .result-score-value.good{color:var(--correct);}
+    .result-score-value.ok{color:var(--warn);}
+    .result-score-value.bad{color:var(--wrong);}
+    .domain-breakdown{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;}
+    .db-header{padding:12px 16px;background:var(--bg3);font-weight:600;font-size:14px;border-bottom:1px solid var(--border);}
+    .domain-row{display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);gap:10px;}
+    .domain-row:last-child{border-bottom:none;}
+    .domain-name{flex:1;font-size:13px;}
+    .domain-bar-track{width:90px;height:6px;background:var(--bg3);border-radius:3px;flex-shrink:0;}
+    .domain-bar-fill{height:100%;border-radius:3px;background:var(--accent);}
+    .domain-acc{font-family:var(--mono);font-size:14px;font-weight:700;min-width:46px;text-align:right;}
+    .domain-acc.good{color:var(--correct);}
+    .domain-acc.ok{color:var(--warn);}
+    .domain-acc.bad{color:var(--wrong);}
+    .review-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:6px;}
+    .review-item-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;}
+    .review-item-header.open{border-bottom:1px solid var(--border);}
+    .review-status{font-size:13px;font-weight:700;}
+    .review-status.correct{color:var(--correct);}
+    .review-status.wrong{color:var(--wrong);}
+    .review-q{font-size:13px;flex:1;color:var(--text2);}
+    .review-body{padding:12px 14px;display:none;}
+    .review-body.open{display:block;}
+    .review-opt{padding:7px 10px;margin:3px 0;border-radius:6px;font-size:13px;border:1px solid transparent;background:var(--bg3);}
+    .review-opt.correct{background:rgba(34,197,94,.12);border-color:var(--correct);}
+    .review-opt.wrong{background:rgba(239,68,68,.12);border-color:var(--wrong);}
+    .badge-correct{color:var(--correct);font-size:11px;font-weight:700;margin-left:6px;}
+    .badge-wrong{color:var(--wrong);font-size:11px;font-weight:700;margin-left:6px;}
+
+    /* ダッシュボード */
+    .set-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+    .set-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;cursor:pointer;transition:all .15s;}
+    .set-card:hover{border-color:var(--accent);}
+    .set-card.active{border-color:var(--accent);background:rgba(59,130,246,.08);}
+    .set-card-title{font-weight:700;font-size:15px;margin-bottom:4px;}
+    .set-card-acc{font-family:var(--mono);font-size:26px;font-weight:900;margin:4px 0;}
+    .set-card-acc.good{color:var(--correct);}
+    .set-card-acc.ok{color:var(--warn);}
+    .set-card-acc.bad{color:var(--wrong);}
+    .set-card-acc.none{color:var(--text2);}
+    .set-card-stats{font-size:12px;color:var(--text2);}
+
+    /* 凡例 */
+    .legend{display:flex;gap:12px;font-size:11px;color:var(--text2);align-items:center;}
+    .legend span{display:flex;align-items:center;gap:4px;}
+    .legend-dot{width:10px;height:10px;border-radius:2px;}
+
+    @media(max-width:600px){
+      .timer-bar{gap:8px;}
+      .stats-inline{gap:10px;}
+      .domain-bar-track{width:60px;}
+      .set-grid{grid-template-columns:1fr 1fr;}
+    }
+    ::-webkit-scrollbar{width:5px;}
+    ::-webkit-scrollbar-track{background:var(--bg);}
+    ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px;}
+  </style>
+</head>
+<body>
+
+<!-- パスワードオーバーレイ -->
+<div class="pw-overlay" id="pwOverlay">
+  <div class="pw-box">
+    <div class="pw-title">🎯 PMP学習</div>
+    <div class="pw-sub">PMP資格試験 対策アプリ（全218問・3セット）</div>
+    <input type="password" class="pw-input" id="pwInput" placeholder="パスワード" autocomplete="current-password">
+    <div class="pw-error" id="pwError"></div>
+    <button class="btn accent" style="width:100%;justify-content:center" onclick="checkPw()">ログイン</button>
+    <p style="text-align:center;margin-top:10px;font-size:11px;color:var(--text2)">デフォルト: pmp2024</p>
+  </div>
+</div>
+
+<!-- ヘッダー -->
+<div class="header">
+  <div class="header-title">🎯 PMP学習</div>
+  <div class="header-right">
+    <div class="set-selector" id="setSelector"></div>
+    <button class="btn sm" onclick="toggleDashboard()" id="dashBtn">📊 ダッシュボード</button>
+    <button class="btn sm" onclick="toggleTheme()" id="themeBtn">☀️</button>
+  </div>
+</div>
+
+<!-- タイマーバー -->
+<div class="timer-bar">
+  <div class="timer-display" id="timerDisplay">3:50:00</div>
+  <div class="timer-controls">
+    <button class="btn sm accent" id="timerStartBtn" onclick="startTimer()">▶ 開始</button>
+    <button class="btn sm" id="timerPauseBtn" onclick="pauseTimer()" style="display:none">⏸ 停止</button>
+    <button class="btn sm" onclick="resetTimer()">↺ リセット</button>
+  </div>
+  <div class="stats-inline">
+    <div class="stat"><span class="stat-lbl">回答済</span><span class="stat-val" id="statAnswered">0/125</span></div>
+    <div class="stat"><span class="stat-lbl">正解</span><span class="stat-val c" id="statCorrect">0</span></div>
+    <div class="stat"><span class="stat-lbl">不正解</span><span class="stat-val w" id="statWrong">0</span></div>
+    <div class="stat"><span class="stat-lbl">正答率</span><span class="stat-val" id="statAcc">-</span></div>
+  </div>
+</div>
+<div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+<!-- クイズビュー -->
+<div class="main" id="quizView">
+  <div class="loading-area" id="loadingArea">
+    <div class="spinner"></div>
+    <span>問題を読み込み中...</span>
+  </div>
+
+  <!-- ナビバー -->
+  <div class="nav-bar">
+    <button class="btn" onclick="prevQ()">← 前へ</button>
+    <button class="btn" onclick="nextQ()">次へ →</button>
+    <select class="filter-select" id="filterSelect" onchange="applyFilter()">
+      <option value="">すべてのドメイン</option>
+    </select>
+    <button class="btn sm accent" onclick="showResults()">📋 結果を見る</button>
+  </div>
+
+  <!-- 問題カード -->
+  <div class="card" id="questionCard" style="display:none">
+    <div class="q-meta">
+      <span class="q-id" id="questionId">Q1 / 全125問</span>
+      <span class="domain-tag" id="domainTag">ドメイン</span>
+    </div>
+    <div class="q-text" id="questionText"></div>
+    <div class="options" id="optionsArea"></div>
+    <div class="explanation" id="explanationArea"></div>
+  </div>
+
+  <!-- 問題グリッド -->
+  <div class="card" style="padding:12px" id="gridCard" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text2)">問題一覧（<span id="gridFilterLabel">全125問</span>）</span>
+      <div class="legend">
+        <span><div class="legend-dot" style="background:rgba(34,197,94,.5);border:1px solid var(--correct)"></div>正解</span>
+        <span><div class="legend-dot" style="background:rgba(239,68,68,.5);border:1px solid var(--wrong)"></div>不正解</span>
+        <span><div class="legend-dot" style="background:var(--bg3);border:1px solid var(--border)"></div>未回答</span>
+      </div>
+    </div>
+    <div class="qgrid" id="qgrid"></div>
+  </div>
+</div>
+
+<!-- 結果ビュー -->
+<div class="main results-view" id="resultsView">
+  <div class="result-score">
+    <div class="result-score-value" id="resultScoreValue">--%</div>
+    <div style="color:var(--text2);font-size:14px;margin-top:6px" id="resultDetail"></div>
+    <div style="color:var(--text2);font-size:12px;margin-top:4px" id="resultTimestamp"></div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" onclick="saveResultsHtml()">💾 HTMLで保存</button>
+    <button class="btn" onclick="window.print()">🖨 PDF出力</button>
+    <button class="btn accent" onclick="showQuiz()">← 問題に戻る</button>
+  </div>
+  <div class="domain-breakdown">
+    <div class="db-header">ドメイン別正答率</div>
+    <div id="domainBreakdown"></div>
+  </div>
+  <div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn sm active" id="showWrongBtn" onclick="showReview('wrong')">不正解のみ</button>
+      <button class="btn sm" id="showAllBtn" onclick="showReview('all')">全問題</button>
+    </div>
+    <div id="reviewList"></div>
+  </div>
+</div>
+
+<!-- ダッシュボードビュー -->
+<div class="main dashboard-view" id="dashboardView">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <h2 style="font-size:16px;font-weight:700">📊 全セット ダッシュボード</h2>
+    <button class="btn sm" onclick="toggleDashboard()">← 問題に戻る</button>
+  </div>
+  <div class="set-grid" id="setGrid"></div>
+  <div class="domain-breakdown">
+    <div class="db-header">全セット ドメイン別正答率</div>
+    <div id="globalDomainBreakdown"></div>
+  </div>
+</div>
+
+<script src="questions.js"></script>
+<script src="quiz.js"></script>
+</body>
+</html>
