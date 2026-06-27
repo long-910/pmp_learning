@@ -6,6 +6,7 @@ const $ = id => document.getElementById(id);
 
 let setIdx = 0, Q = [], perms = [], answers = [], filter = '', pos = 0;
 let remaining = EXAM_SECONDS, timerId = null, running = false, startedOnce = false;
+let bookmarks = [], retakeMode = false, retakeIndices = [];
 
 // --- 順列生成（選択肢シャッフル） ---
 function makePerm() {
@@ -45,6 +46,74 @@ function loadState() {
   } catch { return false; }
 }
 function clearState() { if (storageOK()) localStorage.removeItem(storageKey()); }
+
+// --- ブックマーク ---
+function bookmarkKey(i) { return `pmp_bookmarks_s${i}`; }
+function loadBookmarks(i) {
+  if (!storageOK()) return [];
+  try { return JSON.parse(localStorage.getItem(bookmarkKey(i)) || '[]'); } catch { return []; }
+}
+function saveBookmarksStore(i, marks) {
+  if (storageOK()) localStorage.setItem(bookmarkKey(i), JSON.stringify(marks));
+}
+window.toggleBookmark = function() {
+  const fi = filteredIndices();
+  if (!fi.length) return;
+  const qi = fi[pos];
+  const idx = bookmarks.indexOf(qi);
+  if (idx >= 0) bookmarks.splice(idx, 1);
+  else bookmarks.push(qi);
+  saveBookmarksStore(setIdx, bookmarks);
+  const btn = $('bookmarkBtn');
+  btn.textContent = bookmarks.includes(qi) ? '★' : '☆';
+  btn.classList.toggle('bookmarked', bookmarks.includes(qi));
+  renderGrid();
+};
+
+// --- ストリーク ---
+function updateStreak() {
+  if (!storageOK()) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let dates = [];
+  try { dates = JSON.parse(localStorage.getItem('pmp_study_dates') || '[]'); } catch {}
+  if (!dates.includes(today)) {
+    dates.push(today);
+    localStorage.setItem('pmp_study_dates', JSON.stringify(dates));
+  }
+}
+function getStreak() {
+  if (!storageOK()) return 0;
+  try {
+    const dates = JSON.parse(localStorage.getItem('pmp_study_dates') || '[]');
+    if (!dates.length) return 0;
+    const sorted = [...new Set(dates)].sort().reverse();
+    const today = new Date().toISOString().slice(0, 10);
+    const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if (sorted[0] !== today && sorted[0] !== yest) return 0;
+    let streak = 0;
+    let cur = sorted[0] === today ? new Date() : new Date(Date.now() - 86400000);
+    for (const d of sorted) {
+      if (d === cur.toISOString().slice(0, 10)) {
+        streak++;
+        cur = new Date(cur.getTime() - 86400000);
+      } else break;
+    }
+    return streak;
+  } catch { return 0; }
+}
+
+// --- セッション履歴 ---
+function sessionHistKey() { return 'pmp_sessions_v1'; }
+function loadAllSessions() {
+  if (!storageOK()) return [];
+  try { return JSON.parse(localStorage.getItem(sessionHistKey()) || '[]'); } catch { return []; }
+}
+function saveSession(entry) {
+  const sessions = loadAllSessions();
+  sessions.unshift(entry);
+  if (sessions.length > 20) sessions.length = 20;
+  if (storageOK()) localStorage.setItem(sessionHistKey(), JSON.stringify(sessions));
+}
 
 // --- パスワード ---
 async function sha256(msg) {
@@ -116,6 +185,7 @@ window.resetTimer = function() {
   updateTimerDisplay();
   if (confirm('タイマーと回答をリセットしますか？')) {
     answers = Array(Q.length).fill(undefined); perms = Q.map(() => makePerm()); pos = 0; filter = '';
+    retakeMode = false; $('retakeBar').classList.add('hidden');
     $('filterSelect').value = ''; clearState(); renderQuestion(); renderGrid(); updateStats();
   }
 };
@@ -145,6 +215,8 @@ function sanitizeHtml(s) {
 
 // --- フィルター対象インデックス ---
 function filteredIndices() {
+  if (retakeMode) return retakeIndices;
+  if (filter === '__bookmark__') return bookmarks.slice().sort((a,b)=>a-b);
   if (!filter) return Q.map((_,i)=>i);
   return Q.map((q,i)=>q.d===filter?i:-1).filter(i=>i>=0);
 }
@@ -152,13 +224,24 @@ function filteredIndices() {
 // --- 問題描画 ---
 function renderQuestion() {
   const fi = filteredIndices();
-  if (!fi.length) { $('questionText').textContent = 'このドメインに問題がありません'; $('optionsArea').innerHTML=''; return; }
+  if (!fi.length) {
+    $('questionCard').style.display = 'none';
+    return;
+  }
+  $('questionCard').style.display = 'block';
   if (pos >= fi.length) pos = fi.length - 1;
   const qi = fi[pos];
   const pq = applyPerm(Q[qi], perms[qi]);
-  $('questionId').textContent = `Q${qi+1} / 全${Q.length}問`;
+  $('questionId').textContent = `Q${qi+1} / 全${Q.length}問  (${pos+1}/${fi.length})`;
   $('domainTag').textContent = pq.d;
   $('questionText').innerHTML = sanitizeHtml(pq.q);
+
+  // ブックマークボタン
+  const bmBtn = $('bookmarkBtn');
+  const isBookmarked = bookmarks.includes(qi);
+  bmBtn.textContent = isBookmarked ? '★' : '☆';
+  bmBtn.classList.toggle('bookmarked', isBookmarked);
+
   const opts = $('optionsArea'); opts.innerHTML = '';
   const labels = ['A','B','C','D'];
   const ans = answers[qi];
@@ -170,7 +253,7 @@ function renderQuestion() {
       if (i === pq.a) btn.classList.add('correct');
       else if (i === ans) btn.classList.add('wrong');
     }
-    btn.innerHTML = `<span class="option-label">${labels[i]}.</span><span>${sanitizeHtml(opt)}</span>`;
+    btn.innerHTML = `<span class="opt-lbl">${labels[i]}.</span><span>${sanitizeHtml(opt)}</span>`;
     btn.onclick = () => selectAnswer(qi, i);
     opts.appendChild(btn);
   });
@@ -182,13 +265,37 @@ function renderQuestion() {
 
 function selectAnswer(qi, idx) {
   if (answers[qi] !== undefined) return;
-  answers[qi] = idx; saveState(); renderQuestion(); updateStats();
+  answers[qi] = idx;
+  updateStreak();
+  saveState(); renderQuestion(); updateStats();
 }
 
 // --- ナビゲーション ---
 window.prevQ = function() { if (pos > 0) { pos--; renderQuestion(); } };
 window.nextQ = function() { const fi=filteredIndices(); if (pos < fi.length-1) { pos++; renderQuestion(); } };
-window.applyFilter = function() { filter=$('filterSelect').value; pos=0; renderQuestion(); renderGrid(); saveState(); };
+window.applyFilter = function() {
+  filter = $('filterSelect').value;
+  pos = 0; retakeMode = false; $('retakeBar').classList.add('hidden');
+  renderQuestion(); renderGrid(); saveState();
+};
+
+// --- 再挑戦モード ---
+window.startRetakeMode = function() {
+  const wrongIdxs = Q.map((_,i)=>i).filter(i => answers[i] !== undefined && answers[i] !== applyPerm(Q[i],perms[i]).a);
+  if (!wrongIdxs.length) { alert('不正解の問題がありません！'); return; }
+  // 再挑戦用に回答をリセット
+  wrongIdxs.forEach(i => { answers[i] = undefined; });
+  retakeMode = true;
+  retakeIndices = wrongIdxs;
+  pos = 0; filter = '';
+  $('filterSelect').value = '';
+  $('retakeBar').classList.remove('hidden');
+  saveState(); showQuiz(); renderQuestion(); renderGrid(); updateStats();
+};
+window.exitRetakeMode = function() {
+  retakeMode = false; $('retakeBar').classList.add('hidden');
+  renderQuestion(); renderGrid();
+};
 
 // --- グリッド描画 ---
 function renderGrid() {
@@ -198,11 +305,16 @@ function renderGrid() {
     btn.className = 'qgrid-btn';
     if (i === pos) btn.classList.add('current');
     else if (answers[qi] !== undefined) btn.classList.add(answers[qi]===applyPerm(Q[qi],perms[qi]).a?'correct':'wrong');
+    if (bookmarks.includes(qi)) btn.classList.add('bookmarked');
     btn.textContent = qi+1;
     btn.onclick = () => { pos=i; renderQuestion(); };
     grid.appendChild(btn);
   });
-  $('gridFilterLabel').textContent = filter ? `${filter} (${fi.length}問)` : `全${Q.length}問`;
+  $('gridFilterLabel').textContent = retakeMode
+    ? `再挑戦 (${fi.length}問)`
+    : filter === '__bookmark__'
+      ? `ブックマーク (${fi.length}問)`
+      : filter ? `${filter} (${fi.length}問)` : `全${Q.length}問`;
 }
 
 // --- フィルターオプション構築 ---
@@ -211,6 +323,7 @@ function buildFilterOptions() {
   const sel = $('filterSelect');
   sel.innerHTML = '<option value="">すべてのドメイン</option>';
   domains.forEach(d => { const o=document.createElement('option'); o.value=d; o.textContent=d; if(d===filter)o.selected=true; sel.appendChild(o); });
+  const bm = document.createElement('option'); bm.value='__bookmark__'; bm.textContent='★ ブックマーク済み'; sel.appendChild(bm);
 }
 
 // --- セット読み込み ---
@@ -227,6 +340,8 @@ function loadSet(i) {
 
 function initSet(i) {
   Q = ALL_SETS[i]; $('loadingArea').style.display='none'; $('questionCard').style.display='block';
+  bookmarks = loadBookmarks(i);
+  retakeMode = false; $('retakeBar').classList.add('hidden');
   if (!loadState()) {
     answers = Array(Q.length).fill(undefined); perms = Q.map(()=>makePerm());
     pos = 0; filter = ''; remaining = EXAM_SECONDS; startedOnce = false;
@@ -255,28 +370,116 @@ function buildSetSelector() {
 
 // --- ビュー切り替え ---
 function showQuiz() {
-  $('quizView').classList.remove('hidden'); $('resultsView').classList.remove('show'); $('dashboardView').classList.remove('show');
+  $('quizView').classList.remove('hidden');
+  $('resultsView').classList.remove('show');
+  $('dashboardView').classList.remove('show');
 }
 window.showQuiz = showQuiz;
 window.showResults = function() {
-  $('quizView').classList.add('hidden'); $('resultsView').classList.add('show'); $('dashboardView').classList.remove('show');
+  $('quizView').classList.add('hidden');
+  $('resultsView').classList.add('show');
+  $('dashboardView').classList.remove('show');
   renderResults();
 };
 window.toggleDashboard = function() {
-  const dash=$('dashboardView');
+  const dash = $('dashboardView');
   if (dash.classList.contains('show')) { dash.classList.remove('show'); showQuiz(); }
-  else { $('quizView').classList.add('hidden'); $('resultsView').classList.remove('show'); dash.classList.add('show'); renderDashboard(); }
+  else {
+    $('quizView').classList.add('hidden');
+    $('resultsView').classList.remove('show');
+    dash.classList.add('show');
+    renderDashboard();
+  }
 };
+
+// --- コンフェッティ ---
+function triggerConfetti() {
+  const container = document.createElement('div');
+  container.className = 'confetti-container';
+  document.body.appendChild(container);
+  const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4'];
+  for (let i = 0; i < 90; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-particle';
+    const size = Math.random() * 8 + 4;
+    p.style.cssText = `
+      left:${Math.random()*100}vw;
+      top:-20px;
+      width:${size}px;
+      height:${size}px;
+      background:${colors[Math.floor(Math.random()*colors.length)]};
+      border-radius:${Math.random()>.5?'50%':'2px'};
+      animation-duration:${Math.random()*2+2}s;
+      animation-delay:${Math.random()*.6}s;
+    `;
+    container.appendChild(p);
+  }
+  setTimeout(() => container.remove(), 5000);
+}
+
+// --- ドメイン集計 ---
+function calcDomainStats() {
+  const gd = {};
+  for (let i = 0; i < ALL_SETS.length; i++) {
+    if (!ALL_SETS[i]) continue;
+    const s = storageOK() && localStorage.getItem(`pmp_study_v1_s${i}`);
+    if (!s) continue;
+    try {
+      const d = JSON.parse(s);
+      ALL_SETS[i].forEach((q, j) => {
+        if (!gd[q.d]) gd[q.d] = { t:0, c:0, a:0 };
+        gd[q.d].t++;
+        if (d.answers?.[j] !== undefined) {
+          gd[q.d].a++;
+          const perm = d.perms?.[j] ?? [0,1,2,3];
+          if (d.answers[j] === perm.indexOf(q.a)) gd[q.d].c++;
+        }
+      });
+    } catch {}
+  }
+  return gd;
+}
 
 // --- 結果表示 ---
 function renderResults() {
   const answered = answers.filter(a=>a!==undefined).length;
   const correct = answers.filter((a,i)=>a!==undefined&&a===applyPerm(Q[i],perms[i]).a).length;
   const acc = answered>0?Math.round(correct/answered*100):0;
+
+  // リング
+  const ring = $('resultRingFill');
+  const circ = 2 * Math.PI * 50;
+  const color = acc>=70?'#22c55e':acc>=40?'#f59e0b':'#ef4444';
+  ring.setAttribute('stroke', color);
+  setTimeout(() => { ring.style.strokeDashoffset = circ - (acc/100)*circ; }, 100);
+
   $('resultScoreValue').textContent = acc+'%';
   $('resultScoreValue').className = 'result-score-value' + (acc>=70?' good':acc>=40?' ok':' bad');
   $('resultDetail').textContent = `${correct}問正解 / ${answered}問回答済 / ${Q.length}問中`;
   $('resultTimestamp').textContent = `集計: ${new Date().toLocaleString('ja-JP')} ｜ セット${setIdx+1}`;
+
+  // バッジ
+  const badges = $('resultBadges');
+  badges.innerHTML = '';
+  if (acc >= 70) badges.innerHTML += `<span class="result-badge pass">✓ 合格圏（70%以上）</span>`;
+  else badges.innerHTML += `<span class="result-badge fail">目標まであと${70-acc}%</span>`;
+  if (answered === Q.length) badges.innerHTML += `<span class="result-badge pass">✓ 全問回答</span>`;
+  else badges.innerHTML += `<span class="result-badge warn">未回答 ${Q.length-answered}問</span>`;
+
+  // セッション保存
+  saveSession({
+    set: setIdx,
+    date: new Date().toLocaleString('ja-JP'),
+    acc,
+    correct,
+    answered,
+    total: Q.length,
+    elapsed: EXAM_SECONDS - remaining
+  });
+
+  // コンフェッティ
+  if (acc >= 70) setTimeout(triggerConfetti, 400);
+
   // ドメイン別
   const domains = {};
   Q.forEach((q,i)=>{
@@ -286,87 +489,339 @@ function renderResults() {
   });
   const bd = $('domainBreakdown'); bd.innerHTML='';
   Object.entries(domains).sort((a,b)=>b[1].a-a[1].a).forEach(([d,s])=>{
-    const acc=s.a>0?Math.round(s.c/s.a*100):null;
-    const cls=acc===null?'':acc>=70?'good':acc>=40?'ok':'bad';
+    const acc2=s.a>0?Math.round(s.c/s.a*100):null;
+    const cls=acc2===null?'':acc2>=70?'good':acc2>=40?'ok':'bad';
     const row=document.createElement('div'); row.className='domain-row';
     row.innerHTML=`<span class="domain-name">${d}</span>
-      <div class="domain-bar-track"><div class="domain-bar-fill" style="width:${acc??0}%"></div></div>
-      <span class="domain-acc ${cls}">${acc!==null?acc+'%':'-'}</span>
+      <div class="domain-bar-track"><div class="domain-bar-fill" style="width:0%;background:${acc2===null?'var(--border)':acc2>=70?'var(--correct)':acc2>=40?'var(--warn)':'var(--wrong)'}"></div></div>
+      <span class="domain-acc ${cls}">${acc2!==null?acc2+'%':'-'}</span>
       <span style="font-size:11px;color:var(--text2)">${s.a}/${s.t}</span>`;
     bd.appendChild(row);
+    setTimeout(()=>{ row.querySelector('.domain-bar-fill').style.width = (acc2??0)+'%'; }, 150);
   });
+
   showReview('wrong');
 }
 
 window.showReview = function(mode) {
   $('showWrongBtn').classList.toggle('active',mode==='wrong');
   $('showAllBtn').classList.toggle('active',mode==='all');
+  $('showBookmarkBtn').classList.toggle('active',mode==='bookmark');
   const list=$('reviewList'); list.innerHTML='';
   Q.forEach((q,i)=>{
     const pq=applyPerm(Q[i],perms[i]); const ans=answers[i];
     if(ans===undefined) return;
     const ok=ans===pq.a;
     if(mode==='wrong'&&ok) return;
+    if(mode==='bookmark'&&!bookmarks.includes(i)) return;
     const labels=['A','B','C','D'];
     const item=document.createElement('div'); item.className='review-item';
     item.innerHTML=`
       <div class="review-item-header" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span class="review-status ${ok?'correct':'wrong'}">${ok?'✓':'✗'}</span>
-        <span class="question-id" style="min-width:45px">Q${i+1}</span>
+        <span style="font-family:var(--mono);font-size:12px;min-width:45px">Q${i+1}</span>
+        ${bookmarks.includes(i)?'<span style="color:var(--warn);font-size:12px">★</span>':''}
         <span class="review-q">${sanitizeHtml(q.q).slice(0,80)}…</span>
       </div>
       <div class="review-body">
         <div style="margin-bottom:10px;font-size:14px;line-height:1.6">${sanitizeHtml(pq.q)}</div>
         ${pq.o.map((o,j)=>`<div class="review-opt ${j===pq.a?'correct':j===ans&&!ok?'wrong':''}">
           <strong>${labels[j]}.</strong> ${sanitizeHtml(o)}
-          ${j===pq.a?' <span class="badge-correct">正解</span>':''}${j===ans&&!ok?' <span class="badge-wrong">あなたの回答</span>':''}
+          ${j===pq.a?' <span class="badge-correct">✓ 正解</span>':''}${j===ans&&!ok?' <span class="badge-wrong">✗ あなたの回答</span>':''}
         </div>`).join('')}
         ${pq.e?`<div class="explanation show">${sanitizeHtml(pq.e)}</div>`:''}
       </div>`;
     list.appendChild(item);
   });
   if(!list.children.length)
-    list.innerHTML=`<p style="text-align:center;color:var(--text2);padding:24px">${mode==='wrong'?'全問正解！':'まだ回答がありません'}</p>`;
+    list.innerHTML=`<p style="text-align:center;color:var(--text2);padding:24px">${mode==='wrong'?'全問正解！':mode==='bookmark'?'ブックマークなし':'まだ回答がありません'}</p>`;
 };
+
+// --- SVG ドーナツチャート ---
+function donutSvg(pct, color, size=80) {
+  const r = size * 0.39, c = 2*Math.PI*r, off = c - (pct/100)*c;
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="${size*.13}"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${size*.13}"
+      stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${c.toFixed(1)}"
+      stroke-linecap="round" transform="rotate(-90 ${size/2} ${size/2})"
+      class="donut-arc" data-target="${off.toFixed(1)}"/>
+    <text x="${size/2}" y="${size/2}" text-anchor="middle" dy=".35em" fill="var(--text)"
+      font-size="${size*.19}" font-weight="900" font-family="monospace">${pct}%</text>
+  </svg>`;
+}
+
+function animateDonut(el, targetOffset) {
+  setTimeout(() => {
+    const arcs = el.querySelectorAll('.donut-arc');
+    arcs.forEach(a => {
+      a.style.transition = 'stroke-dashoffset 1s ease';
+      a.style.strokeDashoffset = a.dataset.target;
+    });
+  }, 100);
+}
+
+// --- SVG レーダーチャート ---
+function renderRadarChart(container, data) {
+  if (!data.length) { container.innerHTML = '<p style="text-align:center;color:var(--text2);padding:20px;font-size:12px">データなし</p>'; return; }
+  const size = 260, cx = 130, cy = 130, R = 88, levels = 4;
+  const n = data.length;
+  const angles = data.map((_, i) => (i * 2 * Math.PI / n) - Math.PI / 2);
+
+  let grid = '';
+  for (let l = 1; l <= levels; l++) {
+    const r = R * l / levels;
+    const pts = angles.map(a => `${(cx+r*Math.cos(a)).toFixed(1)},${(cy+r*Math.sin(a)).toFixed(1)}`).join(' ');
+    grid += `<polygon points="${pts}" fill="none" stroke="var(--border)" stroke-width=".8" opacity=".6"/>`;
+    const lx = (cx + (r+3)*Math.cos(-Math.PI/2)).toFixed(1);
+    const ly = (cy + (r+3)*Math.sin(-Math.PI/2) - 2).toFixed(1);
+    grid += `<text x="${lx}" y="${ly}" text-anchor="middle" fill="var(--text2)" font-size="7">${Math.round(l/levels*100)}%</text>`;
+  }
+
+  let axes = '';
+  angles.forEach(a => {
+    axes += `<line x1="${cx}" y1="${cy}" x2="${(cx+R*Math.cos(a)).toFixed(1)}" y2="${(cy+R*Math.sin(a)).toFixed(1)}" stroke="var(--border)" stroke-width=".8" opacity=".6"/>`;
+  });
+
+  const dataPts = data.map((d, i) => {
+    const r = d.answered > 0 ? R * d.value / 100 : 0;
+    return `${(cx+r*Math.cos(angles[i])).toFixed(1)},${(cy+r*Math.sin(angles[i])).toFixed(1)}`;
+  });
+  const dataArea = `<polygon points="${dataPts.join(' ')}" fill="rgba(59,130,246,.2)" stroke="#3b82f6" stroke-width="2"/>`;
+
+  const dots = data.map((d, i) => {
+    const r = d.answered > 0 ? R * d.value / 100 : 0;
+    const dx = (cx+r*Math.cos(angles[i])).toFixed(1), dy = (cy+r*Math.sin(angles[i])).toFixed(1);
+    const c = d.answered===0?'#64748b':d.value>=70?'#22c55e':d.value>=40?'#f59e0b':'#ef4444';
+    return `<circle cx="${dx}" cy="${dy}" r="3.5" fill="${c}" stroke="var(--bg2)" stroke-width="1.5"/>`;
+  }).join('');
+
+  const labelR = R + 20;
+  const labels = data.map((d, i) => {
+    const lx = (cx + labelR*Math.cos(angles[i])).toFixed(1);
+    const ly = (cy + labelR*Math.sin(angles[i])).toFixed(1);
+    const anchor = parseFloat(lx) < cx-6 ? 'end' : parseFloat(lx) > cx+6 ? 'start' : 'middle';
+    const short = d.label.length > 7 ? d.label.slice(0,7)+'…' : d.label;
+    const col = d.answered===0?'var(--text2)':d.value>=70?'var(--correct)':d.value>=40?'var(--warn)':'var(--wrong)';
+    return `<text x="${lx}" y="${ly}" text-anchor="${anchor}" fill="${col}" font-size="8.5" font-weight="600" dy=".35em">${short}</text>`;
+  }).join('');
+
+  // 70%基準線
+  const refPts = angles.map(a => `${(cx+R*.7*Math.cos(a)).toFixed(1)},${(cy+R*.7*Math.sin(a)).toFixed(1)}`).join(' ');
+  const refLine = `<polygon points="${refPts}" fill="none" stroke="rgba(34,197,94,.4)" stroke-width="1" stroke-dasharray="3,3"/>`;
+
+  container.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    ${grid}${axes}${refLine}${dataArea}${dots}${labels}
+  </svg>`;
+}
+
+// --- SVG 横棒グラフ ---
+function renderBarChart(container, data) {
+  if (!data.length) { container.innerHTML = '<p style="text-align:center;color:var(--text2);padding:20px;font-size:12px">データなし</p>'; return; }
+  const barH = 22, gap = 7, padT = 8, padB = 24, labelW = 85, barW = 130, valW = 40;
+  const totalH = data.length*(barH+gap) + padT + padB;
+  const totalW = labelW + barW + valW + 10;
+
+  let bars = '';
+  data.forEach((d, i) => {
+    const y = padT + i*(barH+gap);
+    const w = d.answered>0 ? barW*Math.min(d.value,100)/100 : 0;
+    const col = d.answered===0?'var(--bg3)':d.value>=70?'#22c55e':d.value>=40?'#f59e0b':'#ef4444';
+    const short = d.label.length>11 ? d.label.slice(0,11)+'…' : d.label;
+    bars += `
+      <text x="${labelW-4}" y="${y+barH/2}" text-anchor="end" fill="var(--text2)" font-size="9.5" dy=".35em">${short}</text>
+      <rect x="${labelW}" y="${y}" width="${barW}" height="${barH}" rx="4" fill="var(--bg3)"/>
+      <rect x="${labelW}" y="${y}" width="${w.toFixed(1)}" height="${barH}" rx="4" fill="${col}"/>
+      <text x="${labelW+w+4}" y="${y+barH/2}" fill="var(--text)" font-size="10" font-weight="700" dy=".35em">${d.answered>0?d.value+'%':'-'}</text>
+      <text x="${totalW}" y="${y+barH/2}" text-anchor="end" fill="var(--text2)" font-size="8.5" dy=".35em">${d.answered}/${d.total}</text>
+    `;
+  });
+  // 70%基準線
+  const refX = (labelW + barW*0.7).toFixed(1);
+  const refLine = `<line x1="${refX}" y1="${padT-4}" x2="${refX}" y2="${totalH-padB+4}" stroke="rgba(34,197,94,.5)" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="${refX}" y="${totalH-padB+14}" text-anchor="middle" fill="var(--correct)" font-size="8">70%</text>`;
+
+  container.innerHTML = `<svg viewBox="0 0 ${totalW} ${totalH}" width="100%" style="max-width:${totalW}px">
+    ${refLine}${bars}
+  </svg>`;
+}
+
+// --- 実績 ---
+const ACHIEVEMENTS = [
+  { id:'first_answer', icon:'🎯', name:'初回回答', desc:'初めて問題に答えた' },
+  { id:'halfway', icon:'🏃', name:'ハーフタイム', desc:'1セット50%回答' },
+  { id:'complete_set', icon:'✅', name:'完走', desc:'1セット全問回答' },
+  { id:'pmp_ready', icon:'🏆', name:'PMP合格圏', desc:'正答率70%以上達成' },
+  { id:'perfect_domain', icon:'⭐', name:'ドメイン完璧', desc:'ドメイン正答率100%' },
+  { id:'streak_3', icon:'🔥', name:'3日連続', desc:'3日連続学習' },
+  { id:'streak_7', icon:'⚡', name:'7日連続', desc:'7日連続学習' },
+  { id:'bookmarker', icon:'📌', name:'ブックマーカー', desc:'5問以上ブックマーク' },
+  { id:'all_sets', icon:'🌟', name:'全セット制覇', desc:'全セット70%以上' },
+];
+
+function checkAchievements() {
+  const earned = new Set();
+  let allGood = true, hasAny = false;
+  const streak = getStreak();
+  if (streak >= 3) earned.add('streak_3');
+  if (streak >= 7) earned.add('streak_7');
+
+  for (let i = 0; i < ALL_SETS.length; i++) {
+    const bm = loadBookmarks(i);
+    if (bm.length >= 5) earned.add('bookmarker');
+
+    const s = storageOK() && localStorage.getItem(`pmp_study_v1_s${i}`);
+    if (!s || !ALL_SETS[i]) { allGood = false; continue; }
+    try {
+      const d = JSON.parse(s);
+      if (!d.answers) { allGood = false; continue; }
+      const answered = d.answers.filter(a=>a!==undefined).length;
+      const correct = d.answers.filter((a,j)=>a!==undefined&&d.perms&&a===d.perms[j].indexOf(ALL_SETS[i][j].a)).length;
+      if (answered > 0) { hasAny = true; earned.add('first_answer'); }
+      if (answered >= ALL_SETS[i].length/2) earned.add('halfway');
+      if (answered >= ALL_SETS[i].length) earned.add('complete_set');
+      const acc = answered>0 ? correct/answered*100 : 0;
+      if (acc>=70 && answered>0) earned.add('pmp_ready');
+      else allGood = false;
+      // ドメイン完璧チェック
+      const dom={};
+      ALL_SETS[i].forEach((q,j)=>{
+        if(!dom[q.d])dom[q.d]={a:0,c:0};dom[q.d];
+        if(d.answers[j]!==undefined){dom[q.d].a++;if(d.perms&&d.answers[j]===d.perms[j].indexOf(q.a))dom[q.d].c++;}
+      });
+      if(Object.values(dom).some(s=>s.a>=3&&s.a===s.c)) earned.add('perfect_domain');
+    } catch {}
+  }
+  if (allGood && hasAny) earned.add('all_sets');
+  return earned;
+}
 
 // --- ダッシュボード ---
 function renderDashboard() {
-  const grid=$('setGrid'); grid.innerHTML='';
-  const setNames=['統合・スコープ・スケジュール・コスト','品質・資源・コミュニケーション・リスク・調達・ステークホルダー','アジャイル・ハイブリッド・リーダーシップ'];
+  // サマリー
+  let totalAnswered=0, totalCorrect=0, totalBookmarks=0;
   for(let i=0;i<ALL_SETS.length;i++){
-    const card=document.createElement('div'); card.className='set-card'+(i===setIdx?' active':'');
-    let acc=null,answered=0,total=ALL_SETS[i]?ALL_SETS[i].length:0;
-    const s=storageOK()&&localStorage.getItem(`pmp_study_v1_s${i}`);
-    if(s){try{const d=JSON.parse(s);if(d.answers&&ALL_SETS[i]){const c=d.answers.filter((a,j)=>a!==undefined&&d.perms&&a===d.perms[j].indexOf(ALL_SETS[i][j].a)).length;answered=d.answers.filter(a=>a!==undefined).length;acc=answered>0?Math.round(c/answered*100):null;}}catch{}}
-    const cls=acc===null?'none':acc>=70?'good':acc>=40?'ok':'bad';
-    card.innerHTML=`<div class="set-card-title">Set ${i+1}</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">${setNames[i]}</div>
-      <div class="set-card-acc ${cls}">${acc!==null?acc+'%':'--'}</div>
-      <div class="set-card-stats">${answered}/${total||'?'}問回答済</div>`;
-    card.onclick=()=>loadSet(i); grid.appendChild(card);
-  }
-  // 全体ドメイン集計
-  const gd={};
-  for(let i=0;i<ALL_SETS.length;i++){
+    totalBookmarks += loadBookmarks(i).length;
     if(!ALL_SETS[i]) continue;
     const s=storageOK()&&localStorage.getItem(`pmp_study_v1_s${i}`);
     if(!s) continue;
-    try{const d=JSON.parse(s);ALL_SETS[i].forEach((q,j)=>{
-      if(!gd[q.d])gd[q.d]={t:0,c:0,a:0}; gd[q.d].t++;
-      if(d.answers?.[j]!==undefined){gd[q.d].a++;const perm=d.perms?.[j]??[0,1,2,3];if(d.answers[j]===perm.indexOf(q.a))gd[q.d].c++;}
-    });}catch{}
+    try{const d=JSON.parse(s);
+      if(!d.answers) continue;
+      totalAnswered+=d.answers.filter(a=>a!==undefined).length;
+      totalCorrect+=d.answers.filter((a,j)=>a!==undefined&&d.perms&&a===d.perms[j].indexOf(ALL_SETS[i][j].a)).length;
+    }catch{}
   }
+  const globalAcc = totalAnswered>0 ? Math.round(totalCorrect/totalAnswered*100) : null;
+  const streak = getStreak();
+
+  $('sumTotal').textContent = totalAnswered;
+  $('sumAcc').textContent = globalAcc!==null ? globalAcc+'%' : '-';
+  $('sumAcc').className = 'summary-value' + (globalAcc===null?'':globalAcc>=70?' good':globalAcc>=40?' warn':' bad');
+  $('sumStreak').textContent = streak+'日';
+  $('sumBookmarks').textContent = totalBookmarks;
+
+  // セットカード
+  const grid=$('setGrid'); grid.innerHTML='';
+  const setNames=['統合・スコープ・スケジュール・コスト','品質・資源・コミュニケーション・リスク・調達・ステークホルダー','アジャイル・ハイブリッド・リーダーシップ'];
+  for(let i=0;i<ALL_SETS.length;i++){
+    const card=document.createElement('div');
+    card.className='set-card'+(i===setIdx?' active':'');
+    let acc=null,answered=0,total=ALL_SETS[i]?ALL_SETS[i].length:0;
+    const s=storageOK()&&localStorage.getItem(`pmp_study_v1_s${i}`);
+    if(s){try{const d=JSON.parse(s);if(d.answers&&ALL_SETS[i]){
+      const c=d.answers.filter((a,j)=>a!==undefined&&d.perms&&a===d.perms[j].indexOf(ALL_SETS[i][j].a)).length;
+      answered=d.answers.filter(a=>a!==undefined).length;
+      acc=answered>0?Math.round(c/answered*100):null;
+    }}catch{}}
+    const color=acc===null?'#64748b':acc>=70?'#22c55e':acc>=40?'#f59e0b':'#ef4444';
+    const pctAcc=acc??0, pctDone=total>0?Math.round(answered/total*100):0;
+    card.innerHTML=`
+      <div class="set-card-title">Set ${i+1}</div>
+      <div class="set-card-sub">${setNames[i]}</div>
+      <div style="display:flex;gap:10px;align-items:center;justify-content:center">
+        <div>${donutSvg(pctAcc, color)}</div>
+        <div>${donutSvg(pctDone,'#3b82f6')}</div>
+      </div>
+      <div class="set-card-stats" style="display:flex;gap:12px;justify-content:center;margin-top:4px">
+        <span>正答率</span><span>進捗</span>
+      </div>
+      <div class="set-card-stats">${answered}/${total||'?'}問回答済 ${acc!==null?'｜ '+acc+'%':''}</div>
+    `;
+    card.onclick=()=>loadSet(i);
+    grid.appendChild(card);
+    animateDonut(card, 0);
+  }
+
+  // グラフデータ構築
+  const gd = calcDomainStats();
+  const domData = Object.entries(gd)
+    .sort((a,b)=>a[0].localeCompare(b[0],'ja'))
+    .map(([label,s])=>({ label, value:s.a>0?Math.round(s.c/s.a*100):0, answered:s.a, total:s.t }));
+
+  renderRadarChart($('radarWrap'), domData);
+  renderBarChart($('barChartWrap'), domData);
+
+  // 苦手ドメインアラート
+  const weakDoms = domData.filter(d=>d.answered>0&&d.value<50);
+  const weakEl=$('weakAlert');
+  if(weakDoms.length){
+    weakEl.classList.remove('hidden');
+    weakEl.innerHTML=`<div class="weak-alert">
+      <div class="weak-alert-title">⚠ 強化が必要なドメイン（正答率50%未満）</div>
+      ${weakDoms.map(d=>`<div class="weak-domain-item">
+        <div class="weak-dot"></div>
+        <span style="flex:1;font-size:13px">${d.label}</span>
+        <span style="font-family:var(--mono);font-weight:700;color:var(--wrong)">${d.value}%</span>
+        <span style="font-size:11px;color:var(--text2);margin-left:6px">${d.answered}/${d.total}</span>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    weakEl.classList.add('hidden');
+  }
+
+  // ドメイン詳細
   const bd=$('globalDomainBreakdown'); bd.innerHTML='';
-  if(!Object.keys(gd).length){bd.innerHTML='<p style="text-align:center;color:var(--text2);padding:20px">データがありません</p>';return;}
-  Object.entries(gd).sort((a,b)=>a[0].localeCompare(b[0],'ja')).forEach(([d,s])=>{
-    const acc=s.a>0?Math.round(s.c/s.a*100):null;const cls=acc===null?'':acc>=70?'good':acc>=40?'ok':'bad';
+  if(!domData.length){bd.innerHTML='<p style="text-align:center;color:var(--text2);padding:20px">データがありません</p>';return;}
+  domData.forEach(d=>{
+    const cls=d.answered===0?'':d.value>=70?'good':d.value>=40?'ok':'bad';
     const row=document.createElement('div'); row.className='domain-row';
-    row.innerHTML=`<span class="domain-name">${d}</span>
-      <div class="domain-bar-track"><div class="domain-bar-fill" style="width:${acc??0}%"></div></div>
-      <span class="domain-acc ${cls}">${acc!==null?acc+'%':'-'}</span>
-      <span style="font-size:11px;color:var(--text2)">${s.a}/${s.t}</span>`;
+    row.innerHTML=`<span class="domain-name">${d.label}</span>
+      <div class="domain-bar-track"><div class="domain-bar-fill" style="width:0%;background:${d.answered===0?'var(--bg3)':d.value>=70?'var(--correct)':d.value>=40?'var(--warn)':'var(--wrong)'}"></div></div>
+      <span class="domain-acc ${cls}">${d.answered>0?d.value+'%':'-'}</span>
+      <span style="font-size:11px;color:var(--text2)">${d.answered}/${d.total}</span>`;
     bd.appendChild(row);
+    setTimeout(()=>{ row.querySelector('.domain-bar-fill').style.width=(d.value)+'%'; },150);
   });
+
+  // 実績
+  const earned = checkAchievements();
+  $('achievementCount').textContent = `${earned.size} / ${ACHIEVEMENTS.length} 獲得`;
+  $('achievementGrid').innerHTML = ACHIEVEMENTS.map(a=>`
+    <div class="achievement-card ${earned.has(a.id)?'earned':''}" title="${a.desc}">
+      <span class="achievement-icon">${a.icon}</span>
+      <div class="achievement-name">${a.name}</div>
+      <div class="achievement-desc">${a.desc}</div>
+    </div>
+  `).join('');
+
+  // 学習履歴
+  const sessions = loadAllSessions();
+  const hist=$('sessionHistory');
+  if(!sessions.length){
+    hist.innerHTML='<p style="text-align:center;color:var(--text2);padding:16px;font-size:13px">結果を記録するには「結果を見る」を開いてください</p>';
+  } else {
+    hist.innerHTML=sessions.slice(0,10).map(s=>{
+      const col=s.acc>=70?'#22c55e':s.acc>=40?'#f59e0b':'#ef4444';
+      const barW=Math.round(s.acc);
+      return `<div class="history-item">
+        <span class="history-set">Set ${s.set+1}</span>
+        <span class="history-date">${s.date}</span>
+        <span class="history-acc" style="color:${col}">${s.acc}%</span>
+        <div class="history-bar"><div class="history-bar-fill" style="width:${barW}%;background:${col}"></div></div>
+        <span class="history-detail">${s.correct}/${s.answered}問正解</span>
+      </div>`;
+    }).join('');
+  }
 }
 
 // --- エクスポート ---
