@@ -103,6 +103,14 @@
     .confirm-multi-btn{margin-top:10px;width:100%;justify-content:center;}
     .multi-badge{padding:1px 6px;border-radius:999px;background:rgba(59,130,246,.15);border:1px solid var(--accent);color:var(--accent);font-size:10px;font-weight:700;}
 
+    /* 選択肢ごとの解説 */
+    .option-btn{flex-direction:column;align-items:flex-start;}
+    .opt-top{display:flex;align-items:flex-start;gap:10px;width:100%;}
+    .option-explain{font-size:11px;line-height:1.45;margin-top:5px;padding-top:5px;border-top:1px solid rgba(128,128,128,.2);color:var(--text2);text-align:left;width:100%;}
+    .option-btn.correct .option-explain{color:rgba(34,197,94,.85);}
+    .option-btn.wrong .option-explain{color:rgba(239,68,68,.85);}
+    .option-btn.multi-selected .option-explain{color:var(--accent);}
+
     /* 再挑戦モードバー */
     .retake-bar{background:rgba(245,158,11,.08);border:1px solid var(--warn);border-radius:var(--r);padding:10px 14px;display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;}
     .retake-badge{background:var(--warn);color:#fff;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;}

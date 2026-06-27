@@ -374,6 +374,10 @@ function renderQuestion() {
     const btn = document.createElement('button');
     btn.className = 'option-btn';
 
+    // 選択肢解説（oe）を取得 — 元の順序インデックスで参照
+    const origIdx = perms[qi][i];
+    const oeText = Q[qi].oe && Q[qi].oe[origIdx];
+
     if (ans !== undefined) {
       // 回答済み
       btn.disabled = true;
@@ -388,7 +392,13 @@ function renderQuestion() {
       // 単一選択・未回答
       btn.onclick = () => selectAnswer(qi, i);
     }
-    btn.innerHTML = `<span class="opt-lbl">${labels[i]}.</span><span>${sanitizeHtml(opt)}</span>`;
+
+    // 回答後のみoе表示
+    if (ans !== undefined && oeText) {
+      btn.innerHTML = `<div class="opt-top"><span class="opt-lbl">${labels[i]}.</span><span>${sanitizeHtml(opt)}</span></div><div class="option-explain">${sanitizeHtml(oeText)}</div>`;
+    } else {
+      btn.innerHTML = `<div class="opt-top"><span class="opt-lbl">${labels[i]}.</span><span>${sanitizeHtml(opt)}</span></div>`;
+    }
     opts.appendChild(btn);
   });
 
@@ -495,13 +505,26 @@ function buildFilterOptions() {
 }
 
 // --- セット読み込み ---
+function loadOE(i, callback) {
+  const flagKey = `_oe${i}loaded`;
+  if (window[flagKey]) { callback(); return; }
+  const script = document.createElement('script');
+  script.src = `set-${i}-oe.js`;
+  script.onload = callback;
+  script.onerror = callback; // oe失敗しても続行
+  document.head.appendChild(script);
+}
+
 function loadSet(i) {
   setIdx = i;
   $('loadingArea').style.display = 'flex'; $('questionCard').style.display = 'none';
-  if (ALL_SETS[i]) { initSet(i); return; }
+  if (ALL_SETS[i]) {
+    loadOE(i, () => initSet(i));
+    return;
+  }
   const script = document.createElement('script');
   script.src = `set-${i}.js`;
-  script.onload = () => initSet(i);
+  script.onload = () => loadOE(i, () => initSet(i));
   script.onerror = () => { $('loadingArea').innerHTML = `<p style="color:var(--wrong)">セット${i+1}の読み込みに失敗しました</p>`; };
   document.head.appendChild(script);
 }
@@ -692,10 +715,13 @@ window.showReview = function(mode) {
           const cls=optClass(pq,ans,j);
           const isCorrectOpt = Array.isArray(pq.a)?pq.a.includes(j):j===pq.a;
           const isUserAns = Array.isArray(ans)?ans.includes(j):j===ans;
+          const origJ = (perms[i]||[0,1,2,3,4])[j];
+          const reviewOe = Q[i].oe && Q[i].oe[origJ];
           return `<div class="review-opt ${cls}">
             <strong>${labels[j]}.</strong> ${sanitizeHtml(o)}
             ${isCorrectOpt?' <span class="badge-correct">✓ 正解</span>':''}
             ${isUserAns&&!isCorrectOpt?' <span class="badge-wrong">✗ あなたの回答</span>':''}
+            ${reviewOe?`<div class="option-explain" style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(128,128,128,.2);font-size:11px;color:var(--text2)">${sanitizeHtml(reviewOe)}</div>`:''}
           </div>`;
         }).join('')}
         ${pq.e?`<div class="explanation show">${sanitizeHtml(pq.e)}</div>`:''}
