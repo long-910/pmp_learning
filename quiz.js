@@ -550,7 +550,7 @@ function initSet(i) {
 // --- セットセレクター ---
 function buildSetSelector() {
   const sel = $('setSelector'); sel.innerHTML = '';
-  const names = ['Set 1\n統合・スコープ・スケジュール', 'Set 2\n品質・リスク・調達', 'Set 3\nアジャイル・リーダーシップ'];
+  const names = ['Set 1\n統合・スコープ・スケジュール・コスト','Set 2\n品質・資源・リスク・調達','Set 3\nアジャイル・ピープル・ビジネス環境','Set 4\nビジネス環境・倫理・上位応用','Set 5\n総合模擬試験（全ドメイン）'];
   for (let i=0; i<ALL_SETS.length; i++) {
     const btn = document.createElement('button');
     btn.className = 'set-btn' + (i===0?' active':'');
@@ -866,7 +866,7 @@ function renderDashboard() {
 
   // セットカード
   const grid=$('setGrid'); grid.innerHTML='';
-  const setNames=['統合・スコープ・スケジュール・コスト','品質・資源・コミュニケーション・リスク・調達・ステークホルダー','アジャイル・ハイブリッド・リーダーシップ'];
+  const setNames=['統合・スコープ・スケジュール・コスト','品質・資源・コミュニケーション・リスク・調達・ステークホルダー','アジャイル・ハイブリッド・リーダーシップ・ピープル','ビジネス環境・組織ガバナンス・倫理・PMPシナリオ応用','総合模擬試験（全ドメイン混合）'];
   for(let i=0;i<ALL_SETS.length;i++){
     const card=document.createElement('div');
     card.className='set-card'+(i===setIdx?' active':'');
