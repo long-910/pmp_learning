@@ -649,11 +649,11 @@ function renderResults() {
   if (answered === Q.length) badges.innerHTML += `<span class="result-badge pass">✓ 全問回答</span>`;
   else badges.innerHTML += `<span class="result-badge warn">未回答 ${Q.length-answered}問</span>`;
 
-  // 複数選択問題の内訳
-  const multiQ = Q.filter(q => Array.isArray(q.a));
-  if (multiQ.length > 0) {
-    const multiAnswered = multiQ.filter((q,_) => answers[Q.indexOf(q)] !== undefined).length;
-    const multiCorrect = Q.map((_,i)=>i).filter(i => Array.isArray(Q[i].a) && isCorrectAnswer(i)).length;
+  // 複数選択問題の内訳（インデックスベースで集計）
+  const multiIdxs = Q.map((_,i)=>i).filter(i => Array.isArray(Q[i].a));
+  if (multiIdxs.length > 0) {
+    const multiAnswered = multiIdxs.filter(i => answers[i] !== undefined).length;
+    const multiCorrect = multiIdxs.filter(i => isCorrectAnswer(i)).length;
     badges.innerHTML += `<span class="result-badge warn">複数選択: ${multiCorrect}/${multiAnswered}問正解</span>`;
   }
 

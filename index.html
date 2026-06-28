@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PMP学習アプリ</title>
+  <title>PMP学習アプリ — 302問・5セット</title>
+  <meta name="description" content="PMP資格試験対策。302問・5セット。単一選択＋複数選択問題、選択肢別解説、ドメイン別グラフ、実績バッジ対応。">
+  <meta name="theme-color" content="#0f172a">
   <style>
     :root {
       --bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--text:#e2e8f0;--text2:#94a3b8;
@@ -17,10 +19,13 @@
     body{font-family:'Inter','Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6;font-size:15px;}
 
     /* パスワード */
-    .pw-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200;}
-    .pw-box{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:340px;width:100%;box-shadow:var(--shadow);}
-    .pw-title{font-size:22px;font-weight:800;color:var(--accent);margin-bottom:4px;}
-    .pw-sub{font-size:13px;color:var(--text2);margin-bottom:20px;}
+    .pw-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;}
+    .pw-box{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:380px;width:100%;box-shadow:var(--shadow);}
+    .pw-title{font-size:24px;font-weight:900;color:var(--accent);margin-bottom:2px;letter-spacing:-.02em;}
+    .pw-sub{font-size:13px;color:var(--text2);margin-bottom:16px;}
+    .pw-features{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:20px;}
+    .pw-feature{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);background:var(--bg3);border-radius:6px;padding:6px 8px;}
+    .pw-feature-icon{font-size:14px;flex-shrink:0;}
     .pw-input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);font-size:15px;margin-bottom:10px;outline:none;}
     .pw-input:focus{border-color:var(--accent);}
     .pw-error{color:var(--wrong);font-size:12px;margin-bottom:8px;display:none;}
@@ -245,6 +250,15 @@
     .mini-badge.pass{background:rgba(34,197,94,.15);color:var(--correct);}
     .mini-badge.fail{background:rgba(239,68,68,.15);color:var(--wrong);}
 
+    /* キーボードショートカット表示 */
+    .kbd-hint{display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;background:var(--bg3);border-radius:var(--r);font-size:11px;color:var(--text2);}
+    .kbd-hint span{display:flex;align-items:center;gap:4px;}
+    kbd{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-family:var(--mono);font-size:10px;color:var(--text);}
+
+    /* 問題カードのアニメーション */
+    @keyframes card-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    #questionCard.animating{animation:card-in .18s ease forwards;}
+
     @media(max-width:600px){
       .timer-bar{gap:8px;}
       .stats-inline{gap:10px;}
@@ -263,11 +277,19 @@
 <!-- パスワードオーバーレイ -->
 <div class="pw-overlay" id="pwOverlay">
   <div class="pw-box">
-    <div class="pw-title">🎯 PMP学習</div>
-    <div class="pw-sub">PMP資格試験 対策アプリ（全218問・3セット）</div>
+    <div class="pw-title">🎯 PMP学習アプリ</div>
+    <div class="pw-sub">PMP資格試験 対策 — 302問・5セット・PMP試験形式対応</div>
+    <div class="pw-features">
+      <div class="pw-feature"><span class="pw-feature-icon">📝</span>302問・5セット</div>
+      <div class="pw-feature"><span class="pw-feature-icon">☑️</span>複数選択問題対応</div>
+      <div class="pw-feature"><span class="pw-feature-icon">💡</span>選択肢別解説付き</div>
+      <div class="pw-feature"><span class="pw-feature-icon">📊</span>ドメイン別グラフ</div>
+      <div class="pw-feature"><span class="pw-feature-icon">🚩</span>レビューマーク機能</div>
+      <div class="pw-feature"><span class="pw-feature-icon">🏆</span>実績バッジ10種</div>
+    </div>
     <input type="password" class="pw-input" id="pwInput" placeholder="パスワード" autocomplete="current-password">
     <div class="pw-error" id="pwError"></div>
-    <button class="btn accent" style="width:100%;justify-content:center" onclick="checkPw()">ログイン</button>
+    <button class="btn accent" style="width:100%;justify-content:center;padding:10px" onclick="checkPw()">ログイン →</button>
   </div>
 </div>
 
@@ -290,7 +312,7 @@
     <button class="btn sm" onclick="resetTimer()">↺ リセット</button>
   </div>
   <div class="stats-inline">
-    <div class="stat"><span class="stat-lbl">回答済</span><span class="stat-val" id="statAnswered">0/125</span></div>
+    <div class="stat"><span class="stat-lbl">回答済</span><span class="stat-val" id="statAnswered">0/-</span></div>
     <div class="stat"><span class="stat-lbl">正解</span><span class="stat-val c" id="statCorrect">0</span></div>
     <div class="stat"><span class="stat-lbl">不正解</span><span class="stat-val w" id="statWrong">0</span></div>
     <div class="stat"><span class="stat-lbl">正答率</span><span class="stat-val" id="statAcc">-</span></div>
@@ -325,7 +347,7 @@
   <!-- 問題カード -->
   <div class="card" id="questionCard" style="display:none">
     <div class="q-meta">
-      <span class="q-id" id="questionId">Q1 / 全125問</span>
+      <span class="q-id" id="questionId">Q1 / 全-問</span>
       <span class="domain-tag" id="domainTag">ドメイン</span>
       <button class="bookmark-btn" id="bookmarkBtn" onclick="toggleBookmark()" title="ブックマーク">☆</button>
       <button class="mark-review-btn" id="markReviewBtn" onclick="toggleMarkReview()" title="レビューのためにマーク">🚩</button>
@@ -350,6 +372,13 @@
       </div>
     </div>
     <div class="qgrid" id="qgrid"></div>
+  </div>
+
+  <!-- キーボードショートカット -->
+  <div class="kbd-hint">
+    <span><kbd>←</kbd><kbd>→</kbd> 前後の問題</span>
+    <span><kbd>A</kbd>–<kbd>D</kbd> 選択肢を選ぶ</span>
+    <span><kbd>M</kbd> レビューマーク</span>
   </div>
 </div>
 
